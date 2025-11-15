@@ -1,7 +1,7 @@
 // Server configuration
 const config = {
   // Server settings
-  PORT: process.env.PORT || 5000,
+  PORT: process.env.PORT || 5001,
   FRONTEND_PORT: process.env.FRONTEND_PORT || 8080,
   NODE_ENV: process.env.NODE_ENV || "development",
 
