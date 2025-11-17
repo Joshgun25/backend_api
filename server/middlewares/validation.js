@@ -50,7 +50,26 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(6, "New password must be at least 6 characters"),
 });
 
-// Validation middleware factory
+const propertySchema = z.object({
+  title: z.string().min(1, "Title is required"),
+  description: z.string().optional(),
+  address: z.string().min(1, "Address is required"),
+  price: z.number().positive("Price must be a positive number"),
+  status: z.enum(["available", "sold", "pending", "rented"], {
+    errorMap: () => ({ message: "Status must be one of: available, sold, pending, rented" }),
+  }).optional(),
+});
+
+const updatePropertySchema = z.object({
+  title: z.string().min(1, "Title must be at least 1 character").optional(),
+  description: z.string().optional(),
+  address: z.string().min(1, "Address must be at least 1 character").optional(),
+  price: z.number().positive("Price must be a positive number").optional(),
+  status: z.enum(["available", "sold", "pending", "rented"], {
+    errorMap: () => ({ message: "Status must be one of: available, sold, pending, rented" }),
+  }).optional(),
+});
+
 const validate = (schema) => {
   return (req, res, next) => {
     try {
@@ -58,10 +77,20 @@ const validate = (schema) => {
       req.body = validatedData;
       next();
     } catch (error) {
+      let zodError = null;
+      
       if (error instanceof z.ZodError) {
-        const errors = error.errors.map((err) => ({
-          field: err.path.join("."),
-          message: err.message,
+        zodError = error;
+      } else if (error && error.constructor && error.constructor.name === 'ZodError') {
+        zodError = error;
+      } else if (error && error.name === 'ZodError') {
+        zodError = error;
+      }
+      
+      if (zodError && zodError.errors && Array.isArray(zodError.errors)) {
+        const errors = zodError.errors.map((err) => ({
+          field: err.path && err.path.length > 0 ? err.path.join(".") : "unknown",
+          message: err.message || "Validation error",
         }));
 
         return res.status(400).json({
@@ -70,27 +99,51 @@ const validate = (schema) => {
           details: errors,
         });
       }
+      
+      if (error.message && typeof error.message === 'string' && error.message.includes('"expected"')) {
+        try {
+          const parsedErrors = JSON.parse(error.message);
+          if (Array.isArray(parsedErrors)) {
+            const errors = parsedErrors.map((err) => ({
+              field: err.path && Array.isArray(err.path) && err.path.length > 0 ? err.path.join(".") : "unknown",
+              message: err.message || "Validation error",
+            }));
 
-      res.status(500).json({
+            return res.status(400).json({
+              success: false,
+              error: "Validation failed",
+              details: errors,
+            });
+          }
+        } catch (parseError) {
+          // Continue to default error handling
+        }
+      }
+
+      res.status(400).json({
         success: false,
-        error: "Validation error",
+        error: "Validation failed",
+        message: error.message || "Invalid request data",
       });
     }
   };
 };
 
-// Query parameter validation
 const validateQuery = (schema) => {
   return (req, res, next) => {
     try {
+      if (!req.query) {
+        req.query = {};
+      }
+      
       const validatedQuery = schema.parse(req.query);
       req.query = validatedQuery;
       next();
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z.ZodError && error.errors && Array.isArray(error.errors)) {
         const errors = error.errors.map((err) => ({
-          field: err.path.join("."),
-          message: err.message,
+          field: err.path ? err.path.join(".") : "unknown",
+          message: err.message || "Validation error",
         }));
 
         return res.status(400).json({
@@ -103,6 +156,7 @@ const validateQuery = (schema) => {
       res.status(500).json({
         success: false,
         error: "Query validation error",
+        message: error.message || "Unknown validation error",
       });
     }
   };
@@ -135,6 +189,12 @@ const transactionQuerySchema = z.object({
     .optional(),
   limit: z.string().regex(/^\d+$/).transform(Number).optional(),
 });
+
+const propertyQuerySchema = z.object({
+  status: z.enum(["available", "sold", "pending", "rented"]).optional(),
+  limit: z.string().regex(/^\d+$/).transform(Number).optional(),
+  offset: z.string().regex(/^\d+$/).transform(Number).optional(),
+}).passthrough();
 
 // Sanitization middleware
 const sanitizeInput = (req, res, next) => {
@@ -224,12 +284,15 @@ module.exports = {
   withdrawalSchema,
   updateProfileSchema,
   changePasswordSchema,
+  propertySchema,
+  updatePropertySchema,
   validate,
   validateQuery,
   paginationSchema,
   marketQuerySchema,
   orderQuerySchema,
   transactionQuerySchema,
+  propertyQuerySchema,
   sanitizeInput,
   validateTradingPair,
   validateAmount
